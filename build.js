@@ -46,7 +46,8 @@ console.log(`✅ Set isDemo = ${isDemo}`);
 
 // Update package.json productName and appId
 const packagePath = path.join(__dirname, 'package.json');
-const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+const originalPackageJson = fs.readFileSync(packagePath, 'utf8');
+const pkg = JSON.parse(originalPackageJson);
 
 if (isDemo) {
     pkg.productName = 'Fill That PDF! (Demo)';
@@ -103,5 +104,11 @@ try {
     }
 } catch (error) {
     console.error('❌ Build failed:', error.message);
+    // Restore original package.json before exiting
+    fs.writeFileSync(packagePath, originalPackageJson);
     process.exit(1);
+} finally {
+    // Always restore original package.json so filtered extraResources don't persist
+    fs.writeFileSync(packagePath, originalPackageJson);
+    console.log('✅ Restored original package.json');
 }

@@ -116,6 +116,10 @@
         "to": "python_dist/dist_x64"
       },
       {
+        "from": "python_dist/dist_win",
+        "to": "python_dist/dist_win"
+      },
+      {
         "from": "python_dist/smart_fillable_v24.py",
         "to": "smart_fillable_v24.py"
       },
