@@ -20,7 +20,7 @@ class FillSettings:
             try:
                 self.settings = json.loads(settings_json)
             except Exception as e:
-                print(f"⚠️ Error parsing settings JSON: {e}")
+                print(f"[WARNING] Error parsing settings JSON: {e}")
         
         # Default styling
         self.bg_color = self._parse_color(self.settings.get('field_background_color', '#EDF4FF'))
@@ -535,14 +535,14 @@ def fill_pdf(input_path: str, output_path: str = None, settings_json: str = None
         if output_path is None:
             output_path = f"{os.path.splitext(input_path)[0]}_FILLED.pdf"
         
-        print(f"📄 Opening: {input_path}")
+        print(f"Opening: {input_path}")
         pdf = pikepdf.open(input_path, allow_overwriting_input=True)
         
         if '/AcroForm' in pdf.Root and '/XFA' in pdf.Root.AcroForm:
             del pdf.Root.AcroForm['/XFA']
 
         if '/AcroForm' not in pdf.Root:
-            print("❌ No form fields found")
+            print("[ERROR] No form fields found")
             return
         
         acroform = pdf.Root.AcroForm
@@ -663,9 +663,9 @@ def fill_pdf(input_path: str, output_path: str = None, settings_json: str = None
                         source_scale_overrides[ref] = 'large'
 
         if calc_fields:
-            print(f"🔢 Found {len(calc_fields)} calculated fields, {len(calc_source_names)} source fields")
+            print(f"Found {len(calc_fields)} calculated fields, {len(calc_source_names)} source fields")
             if source_scale_overrides:
-                print(f"📏 {len(source_scale_overrides)} source fields with scaled values (formulas with large divisors)")
+                print(f"   {len(source_scale_overrides)} source fields with scaled values (formulas with large divisors)")
 
         # ---- PASS 2: Fill regular fields + source fields ----
         filled_values = {}  # name -> numeric value (for calculation engine)
@@ -887,7 +887,7 @@ def fill_pdf(input_path: str, output_path: str = None, settings_json: str = None
                         field['/AP'] = pikepdf.Dictionary({'/N': make_appearance_dict(pdf, 'Yes', w, h, fill_settings.checkbox_style)})
                         counts['checkbox'] += 1
             except Exception as e:
-                print(f"⚠️ Error processing field '{name}': {e}")
+                print(f"[WARNING] Error processing field '{name}': {e}")
                 continue
         
         # ---- PASS 3: Compute calculated field values ----
@@ -927,14 +927,14 @@ def fill_pdf(input_path: str, output_path: str = None, settings_json: str = None
 
                 computed_count += 1
 
-            print(f"🧮 Computed {computed_count} calculated field values")
+            print(f"Computed {computed_count} calculated field values")
 
         pdf.save(output_path)
         pdf.close()
-        print(f"\n📊 Summary:\n   📝 Text: {counts['text']}\n   🔘 Radio: {counts['radio']}\n   ☑️  Check: {counts['checkbox']}\n💾 Saved: {output_path}")
+        print(f"\nSummary:\n   Text: {counts['text']}\n   Radio: {counts['radio']}\n   Check: {counts['checkbox']}\n   Saved: {output_path}")
 
     except Exception as e:
-        print(f"❌ Error filling PDF: {e}")
+        print(f"[ERROR] Error filling PDF: {e}")
         # traceback.print_exc()
         sys.exit(1)
 

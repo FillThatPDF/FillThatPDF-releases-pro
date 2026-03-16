@@ -166,7 +166,7 @@ def fix_checkbox_appearances(pdf_path: str) -> bool:
     Also fixes radio group /AS values.
     Returns True if successful.
     """
-    print(f"☑️  Fixing checkbox/radio appearances in: {pdf_path}")
+    print(f"Fixing checkbox/radio appearances in: {pdf_path}")
     
     try:
         pdf = pikepdf.Pdf.open(pdf_path, allow_overwriting_input=True)
@@ -244,11 +244,11 @@ def fix_checkbox_appearances(pdf_path: str) -> bool:
         
         pdf.save(pdf_path)
         
-        print(f"   ✅ Fixed {fixed_checkboxes} checkboxes, {fixed_radios} radio groups")
+        print(f"   [OK] Fixed {fixed_checkboxes} checkboxes, {fixed_radios} radio groups")
         return True
         
     except Exception as e:
-        print(f"   ❌ Error: {e}")
+        print(f"   [ERROR] Error: {e}")
         return False
 
 

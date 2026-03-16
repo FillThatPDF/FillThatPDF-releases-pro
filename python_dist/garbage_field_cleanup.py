@@ -304,7 +304,7 @@ def cleanup_garbage_fields(pdf_path: str, output_path: str = None, verbose: bool
         return result
     
     if verbose:
-        print(f"🧹 Garbage Field Cleanup (Spatial)")
+        print(f"Garbage Field Cleanup (Spatial)")
         print(f"   Input: {Path(pdf_path).name}")
         print(f"   Pages: {len(pdf.pages)}")
     
@@ -376,7 +376,7 @@ def cleanup_garbage_fields(pdf_path: str, output_path: str = None, verbose: bool
                             print(f"      - '{field_name[:40]}' ({reason}) | coverage={meta.get('coverage_pct',0):.1f}% words={meta.get('word_count',0)} thin_seps={meta.get('thin_vertical_lines',0)} ff={meta.get('ff_val',0)} maxlen={meta.get('maxlen')}")
                     else:
                         if verbose:
-                            print(f"      ⚠️  Could not find widget on page for '{field_name[:40]}' | reason={reason}")
+                            print(f"      [WARNING] Could not find widget on page for '{field_name[:40]}' | reason={reason}")
                 except Exception as e:
                     if verbose:
                         import traceback
@@ -393,7 +393,7 @@ def cleanup_garbage_fields(pdf_path: str, output_path: str = None, verbose: bool
             pdf.close()
             
             if verbose:
-                print(f"   ✅ Removed {fields_removed_total} garbage fields from {len(pages_cleaned)} pages")
+                print(f"   [OK] Removed {fields_removed_total} garbage fields from {len(pages_cleaned)} pages")
             
             result['success'] = True
             result['fields_removed'] = fields_removed_total
@@ -404,7 +404,7 @@ def cleanup_garbage_fields(pdf_path: str, output_path: str = None, verbose: bool
     else:
         pdf.close()
         if verbose:
-            print(f"   ✅ No garbage fields found - PDF is clean")
+            print(f"   [OK] No garbage fields found - PDF is clean")
         result['success'] = True
         result['message'] = "No garbage fields found"
     

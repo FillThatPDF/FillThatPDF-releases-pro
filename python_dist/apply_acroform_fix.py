@@ -46,25 +46,25 @@ def apply_preview_save(pdf_path: str) -> bool:
         time.sleep(0.5)
         return result.returncode == 0
     except subprocess.TimeoutExpired:
-        print("   ⚠️ Preview save timed out")
+        print("   [WARNING] Preview save timed out")
         return False
     except Exception as e:
-        print(f"   ⚠️ Preview save error: {e}")
+        print(f"   [WARNING] Preview save error: {e}")
         return False
 
 
 def apply_acroform_fix(pdf_path):
     """Apply the Preview save trick to fix Acrobat compatibility."""
-    print(f"🔧 Applying Acrobat fix to: {pdf_path}")
+    print(f"Applying Acrobat fix to: {pdf_path}")
     
     # Use Preview save trick - most reliable method
-    print("   🔄 Opening in Preview to regenerate appearances...")
+    print("   Opening in Preview to regenerate appearances...")
     if apply_preview_save(pdf_path):
-        print("   ✅ Preview save complete - PDF ready for Acrobat!")
+        print("   [OK] Preview save complete - PDF ready for Acrobat!")
         return True
     else:
         # Fallback to NeedAppearances flag
-        print("   ⚠️ Preview save failed, trying NeedAppearances fallback...")
+        print("   [WARNING] Preview save failed, trying NeedAppearances fallback...")
         try:
             import pikepdf
             
@@ -74,10 +74,10 @@ def apply_acroform_fix(pdf_path):
                 acroform = pdf.Root['/AcroForm']
                 acroform['/NeedAppearances'] = True
                 pdf.save(pdf_path)
-                print("   ✅ NeedAppearances flag set (fallback)")
+                print("   [OK] NeedAppearances flag set (fallback)")
             
         except Exception as e:
-            print(f"   ❌ Error: {e}")
+            print(f"   [ERROR] Error: {e}")
             return False
     
     return True
