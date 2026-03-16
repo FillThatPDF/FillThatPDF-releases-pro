@@ -53,7 +53,7 @@ class UnifiedResolver:
 
         # Step 1: Pre-filter obviously invalid candidates
         filtered = self._prefilter(candidates, page_map)
-        print(f"   [Resolver] {len(candidates)} candidates → {len(filtered)} after pre-filter")
+        print(f"   [Resolver] {len(candidates)} candidates -> {len(filtered)} after pre-filter")
 
         # Step 2: Sort by rank (highest first), then area (largest first for ties)
         filtered.sort(key=lambda c: (-get_source_rank(c.source), -c.area, c.y0, c.x0))

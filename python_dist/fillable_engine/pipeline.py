@@ -135,7 +135,7 @@ class Pipeline:
         # Summary
         elapsed = time.time() - start
         print(f"{'='*60}")
-        print(f"Done in {elapsed:.2f}s — {len(resolved)} fields → {self.output_pdf}")
+        print(f"Done in {elapsed:.2f}s -- {len(resolved)} fields -> {self.output_pdf}")
         print(f"{'='*60}\n")
 
         # Print field summary by page

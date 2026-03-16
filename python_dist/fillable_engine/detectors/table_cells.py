@@ -1124,7 +1124,7 @@ class TableCellDetector(BaseDetector):
                     r.label_position = 'above'
                     converted += 1
             if converted:
-                print(f"   [TableCells] Consistency: converted {converted} beside→below")
+                print(f"   [TableCells] Consistency: converted {converted} beside->below")
 
         return results
 
@@ -1557,7 +1557,7 @@ class TableCellDetector(BaseDetector):
                     r.label_position = 'above'
                     converted += 1
             if converted:
-                print(f"   [TableCells] Consistency: converted {converted} beside→below")
+                print(f"   [TableCells] Consistency: converted {converted} beside->below")
 
         return results
 
