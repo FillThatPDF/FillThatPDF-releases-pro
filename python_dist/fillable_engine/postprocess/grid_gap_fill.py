@@ -279,7 +279,7 @@ class GridGapFill:
             if colored_shapes >= 5:
                 for f in fields:
                     if (f.page == pg.page_num
-                            and f.y0 < first_hbar_y
+                            and f.y0 < first_hbar_y - 2
                             and f.field_type == FieldType.TEXT):
                         infographic_zone_ids.add(id(f))
         if infographic_zone_ids:
@@ -610,6 +610,25 @@ class GridGapFill:
                 continue
 
             if self._in_square_grid(cx0, cy0, cx1, cy1, page):
+                continue
+
+            # --- COMB field adjacency guard ---
+            # Narrow cells directly above or below a COMB (box_entry)
+            # field are structural gaps between the comb grid and
+            # adjacent rows — not fillable areas.  Without this,
+            # HeightStandardizer expands them into the comb region.
+            _near_comb = False
+            if (cy1 - cy0) < 12:
+                for f in page_fields:
+                    if f.field_type != FieldType.COMB:
+                        continue
+                    x_ov = min(cx1, f.x1) - max(cx0, f.x0)
+                    if x_ov < 5:
+                        continue
+                    if abs(cy0 - f.y1) < 5 or abs(cy1 - f.y0) < 5:
+                        _near_comb = True
+                        break
+            if _near_comb:
                 continue
 
             # --- Small-table adjacency guard ---
@@ -1027,6 +1046,15 @@ class GridGapFill:
                             adj = text_bottom + 2
                             if (sy1 - adj) >= MIN_CELL_H:
                                 fy0 = adj
+
+                # On h-line-only pages every cell is a lone underscored
+                # line with no enclosing v-line grid.  Cap the field
+                # height so it doesn't span the full gap between two
+                # h-lines (which can be 40-60 pt), keeping it visually
+                # attached to the bottom h-line (the actual form line).
+                LONE_LINE_MAX_H = 20.0
+                if skip_thin and (sy1 - fy0) > LONE_LINE_MAX_H:
+                    fy0 = sy1 - LONE_LINE_MAX_H
 
                 row_label = row_labels.get(round(sy0, 1), '')
                 col_header = col_headers.get(round(sx0, 1), '')

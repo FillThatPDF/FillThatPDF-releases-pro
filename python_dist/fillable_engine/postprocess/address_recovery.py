@@ -446,8 +446,9 @@ class AddressRowRecovery:
                 b_name = (b.name or '').lower()
                 if a_kw not in b_name:
                     continue
-                # Check y-range overlap
-                if a.y0 >= b.y1 + 5 or a.y1 <= b.y0 - 5:
+                # Check y-range overlap — require actual positive overlap,
+                # not just adjacency (e.g. two rows sharing a boundary line)
+                if min(a.y1, b.y1) - max(a.y0, b.y0) < 3:
                     continue
                 # Check x-range overlap (>50% of smaller field)
                 x_ov = min(a.x1, b.x1) - max(a.x0, b.x0)

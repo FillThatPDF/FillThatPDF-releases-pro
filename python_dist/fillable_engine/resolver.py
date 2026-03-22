@@ -281,10 +281,15 @@ class UnifiedResolver:
                         c.x1 = new_x1
 
             # Header bar exclusion (non-protected sources)
+            # label_entry_cell and horizontal_line_table are smart label-aware
+            # detectors that explicitly find fill areas next to "$:", "___" etc.
+            # They must not be suppressed even when the table row has a colored
+            # background that the page analyzer misclassifies as a header bar.
             if c.field_type == FieldType.TEXT and c.source not in (
                 'signature', 'date', 'grid_fallback',
                 'split_cell_multi_row', 'form_line_segment', 'box_entry',
-                'comb_box_grid', 'label_entry_below',
+                'comb_box_grid', 'label_entry_below', 'label_entry_cell',
+                'horizontal_line_table',
                 'audit_gap_fill', 'user_injected', 'large_image_rect',
                 'embedded_underscore', 'general_underscore',
                 'char_underscore_run',
@@ -315,12 +320,16 @@ class UnifiedResolver:
             # table segments are almost always section-header-row artefacts
             # (e.g. "LED Lamp Replacing CFL" spanning the gap).  Only suppress
             # when the gap area actually contains text (is a section header).
+            # Exception: HLT candidates with a label are data-entry rows
+            # (the detector explicitly found a colon label and created a
+            # field next to it), not section headers.
             if (c.field_type == FieldType.TEXT
                     and c.source in (
                         'horizontal_line_table', 'horizontal_line_table_subrow',
                         'table_data_row', 'sub_table_data_row',
                         'special_structural_header',
                     )
+                    and not (c.label and c.source == 'horizontal_line_table')
                     and pg.is_in_table_gap(c.x0, c.y0, c.x1, c.y1, 30)):
                 # The gap has descriptive text — skip this field
                 gap_text = pg.get_text_in_bbox(
@@ -328,6 +337,23 @@ class UnifiedResolver:
                 # Only skip if the gap area itself has text (section title)
                 # OR if the field is narrow (sub-column fragment)
                 if gap_text.strip() or c.width < 100:
+                    continue
+
+            # split_line_gap crossing row-separating h-lines — a gap field
+            # that straddles two table rows is almost certainly a
+            # mis-detection.  Reject it so individual row candidates survive.
+            if c.source == 'split_line_gap' and c.field_type == FieldType.TEXT:
+                _slg_cross = 0
+                _slg_w = max(1, c.x1 - c.x0)
+                for _hl in pg.h_lines:
+                    _hy = float(_hl.get('y', _hl.get('y0', _hl.get('top', 0))))
+                    _hx0 = float(_hl.get('x0', 0))
+                    _hx1 = float(_hl.get('x1', 0))
+                    if (c.y0 + 3 < _hy < c.y1 - 3
+                            and (_hx1 - _hx0) > 30
+                            and min(_hx1, c.x1) - max(_hx0, c.x0) > _slg_w * 0.5):
+                        _slg_cross += 1
+                if _slg_cross >= 1:
                     continue
 
             # Column classification — suppress text fields in read-only columns.
@@ -466,6 +492,20 @@ class UnifiedResolver:
             # below labels on forms like RECO) and must be kept.
             if c.source == 'split_cell_multi_row' and c.height < 12:
                 if pg.rect_has_text(c.x0, c.y0, c.x1, c.y1, min_chars=2):
+                    continue
+                # Also discard thin split_cell strips when a full-height
+                # label_entry_cell candidate covers the same column in the
+                # same row.  The thin strip is the "entry space only" slice
+                # of the cell; the label_entry_cell is the properly-bounded
+                # full-row field that should win instead.
+                has_lec_companion = any(
+                    oc.source == 'label_entry_cell'
+                    and oc.page == c.page
+                    and oc.y0 <= c.y0 + 2 and oc.y1 >= c.y1 - 2
+                    and min(oc.x1, c.x1) - max(oc.x0, c.x0) > 0.5 * (c.x1 - c.x0)
+                    for oc in candidates
+                )
+                if has_lec_companion:
                     continue
 
             # Tiny structural_box exclusion — narrow grid cell fragments
@@ -672,8 +712,22 @@ class UnifiedResolver:
                 y_gap = min(abs(candidate.y0 - existing.y1),
                             abs(existing.y0 - candidate.y1))
                 if y_gap <= 3:
+                    # Empty-box + signature adjacency is a common form
+                    # pattern (comment box above signature line) — always allow.
+                    if ((candidate.source == 'empty_box'
+                            and existing.source == 'signature')
+                        or (candidate.source == 'signature'
+                            and existing.source == 'empty_box')):
+                        pass  # Comment box + signature — not redundant
+                    # label_entry_cell adjacent to a comb (box_entry) is the
+                    # label row above comb boxes, not an entry area — reject.
+                    elif ((candidate.source == 'label_entry_cell'
+                            and existing.source == 'box_entry')
+                        or (candidate.source == 'box_entry'
+                            and existing.source == 'label_entry_cell')):
+                        return 'discard'  # Label row above comb — redundant
                     # Grid-cell sources in adjacent rows are independent
-                    if (candidate.source in GRID_CELL_SOURCES
+                    elif (candidate.source in GRID_CELL_SOURCES
                             and existing.source in GRID_CELL_SOURCES):
                         pass  # Adjacent grid cells — not redundant
                     # Width similarity — skip adjacency for very different widths
@@ -738,6 +792,8 @@ class UnifiedResolver:
                 threshold = 0.4   # Checkbox vs text: moderate threshold
             elif is_checkbox and is_existing_checkbox:
                 threshold = 0.3   # Checkbox vs checkbox
+            elif existing.is_comb and not getattr(candidate, 'is_comb', False):
+                threshold = 0.05  # Comb grid: any overlap discards text
             else:
                 threshold = 0.4   # Text vs text
 

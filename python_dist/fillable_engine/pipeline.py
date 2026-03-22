@@ -18,6 +18,7 @@ from .page_analyzer import PageAnalyzer
 from .resolver import UnifiedResolver
 from .writer import PDFWriter
 from .detectors.base import BaseDetector
+from .calibration import auto_calibrate
 
 
 class Pipeline:
@@ -80,6 +81,13 @@ class Pipeline:
         if not pages:
             print("   No pages to process!")
             return str(self.output_pdf)
+
+        # Phase 1.5: AUTO-CALIBRATE (optional)
+        if self.settings.get('auto_calibrate', False):
+            print("Phase 1.5: Auto-calibrating detection settings...")
+            t15 = time.time()
+            auto_calibrate(pages, self.settings)
+            print(f"   Phase 1.5 complete ({time.time() - t15:.2f}s)\n")
 
         # Phase 2: DETECT
         print(f"Phase 2: Running {len(self._detector_classes)} detectors...")

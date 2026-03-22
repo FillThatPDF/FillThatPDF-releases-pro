@@ -192,8 +192,15 @@ class HorizontalLineTableDetector(BaseDetector):
                         validated.append(lg)
             line_groups = validated
 
-        # Add header bar boundaries
-        line_groups.extend(header_bar_boundaries)
+        # Add header bar boundaries — skip any whose y is already covered by
+        # an existing h_line in line_groups (within 3pt tolerance).  When a
+        # colored header-bar rect's edges are already captured as vector lines
+        # the duplicate entry creates a zero-height phantom row that breaks the
+        # prev_row_valid guard and causes the label from the header bar to bleed
+        # incorrectly into the following content row.
+        for hb in header_bar_boundaries:
+            if not any(abs(hb['y'] - lg['y']) < 3 for lg in line_groups):
+                line_groups.append(hb)
 
         if len(line_groups) < 2:
             return results
@@ -221,12 +228,21 @@ class HorizontalLineTableDetector(BaseDetector):
             if row_height < 12 or row_height > 80:
                 continue
 
-            # Find vertical lines in this row's Y range
-            row_v_lines = [
-                v for v in v_lines_raw
-                if (v.get('top', v.get('y0', 0)) <= row_y2 + 2
-                    and v.get('bottom', v.get('y1', 0)) >= row_y1 - 2)
-            ]
+            # Find vertical lines that genuinely span into this row.
+            # A v-line must overlap the row interior by at least
+            # min(4pt, 25% of row height) to count as a column
+            # boundary.  This prevents v-lines from an adjacent row
+            # (that merely touch the shared border) from creating
+            # spurious column splits in merged-cell rows like
+            # "Account Name:" which spans the full table width.
+            min_v_overlap = min(4, row_height * 0.25)
+            row_v_lines = []
+            for v in v_lines_raw:
+                vtop = float(v.get('top', v.get('y0', 0)))
+                vbot = float(v.get('bottom', v.get('y1', 0)))
+                overlap = min(vbot, row_y2) - max(vtop, row_y1)
+                if overlap >= min_v_overlap:
+                    row_v_lines.append(v)
             v_line_x_positions = sorted(set(
                 round(min(v.get('x0', 0), v.get('x1', 0)))
                 for v in row_v_lines
@@ -783,7 +799,16 @@ class HorizontalLineTableDetector(BaseDetector):
             cell_text = ' '.join(w.get('text', '') for w in cell_words).strip()
             if cell_text:
                 if cell_text.rstrip().endswith(':'):
-                    pass  # Label-over-fill cell — allow gap-fill
+                    # Check if the label fills most of the cell — if so,
+                    # this is a pure label column (entry area is to the
+                    # right), NOT a label-over-fill cell.
+                    if cell_words:
+                        tw_x0 = min(float(w.get('x0', 0)) for w in cell_words)
+                        tw_x1 = max(float(w.get('x1', 0)) for w in cell_words)
+                        text_span = tw_x1 - tw_x0
+                        cell_span = max(1.0, cx1 - cx0)
+                        if text_span / cell_span > 0.65:
+                            continue  # Label fills the cell — skip
                 else:
                     continue  # Non-label text — skip
 

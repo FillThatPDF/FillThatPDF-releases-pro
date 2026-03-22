@@ -1105,10 +1105,13 @@ class TableCellDetector(BaseDetector):
             margin = self.table_cell_padding
             converted = 0
             for r in beside_results:
-                # Recover the original cell by searching for label words
-                # label_entry_cell: x0 = word_x1 + 4, so label is to the left
+                # Recover the original cell by searching for label words.
+                # label_entry_cell: x0 = word_x1 + 4, so label is to the left.
+                # Search up to 20pt above r.y0 — in tall cells the label
+                # sits at the cell top while the beside-field sits near
+                # the bottom, so r.y0-2 misses the label text.
                 label_words = pm.get_words_in_bbox(
-                    (r.x0 - 200, r.y0 - 2, r.x0, r.y1 + 2), 0.3,
+                    (r.x0 - 200, r.y0 - 20, r.x0, r.y1 + 2), 0.3,
                 )
                 if not label_words:
                     continue
@@ -1117,7 +1120,7 @@ class TableCellDetector(BaseDetector):
                 text_bottom = max(float(w['bottom']) for w in label_words)
                 entry_y0 = text_bottom + 0.5
                 entry_y1 = r.y1  # keep the same bottom (= cell bottom - margin)
-                if entry_y1 - entry_y0 > 8:
+                if entry_y1 - entry_y0 > 9:
                     r.x0 = cell_x0 + margin
                     r.y0 = entry_y0
                     r.source = 'label_entry_below'
@@ -1541,8 +1544,9 @@ class TableCellDetector(BaseDetector):
             margin = self.table_cell_padding
             converted = 0
             for r in beside_results:
+                # Search up to 20pt above r.y0 (same fix as Track A)
                 label_words = pm.get_words_in_bbox(
-                    (r.x0 - 200, r.y0 - 2, r.x0, r.y1 + 2), 0.3,
+                    (r.x0 - 200, r.y0 - 20, r.x0, r.y1 + 2), 0.3,
                 )
                 if not label_words:
                     continue
@@ -1550,7 +1554,7 @@ class TableCellDetector(BaseDetector):
                 text_bottom = max(float(w['bottom']) for w in label_words)
                 entry_y0 = text_bottom + 0.5
                 entry_y1 = r.y1
-                if entry_y1 - entry_y0 > 8:
+                if entry_y1 - entry_y0 > 9:
                     r.x0 = cell_x0 + margin
                     r.y0 = entry_y0
                     r.source = 'label_entry_below'
@@ -2012,20 +2016,21 @@ class TableCellDetector(BaseDetector):
         if gap_words:
             return None
 
-        # Skip cells with multiple interior form underlines.
-        # Each underline marks a separate field that HLT / FormLine
-        # detectors will handle individually.  A single large
-        # label_entry_cell would block them all.
+        # Skip cells with interior row-separating h-lines.
+        # Each h-line marks a table row boundary — a label_entry_cell
+        # should not span multiple rows.  Use overlap (not containment)
+        # because table-wide h-lines extend beyond individual columns.
         interior_hlines = 0
+        cell_w = max(1, x1 - x0)
         for hl in pm.h_lines:
-            hy = hl.get('y0', hl.get('top', 0))
-            hx0 = hl.get('x0', 0)
-            hx1 = hl.get('x1', 0)
+            hy = float(hl.get('y0', hl.get('top', 0)))
+            hx0 = float(hl.get('x0', 0))
+            hx1 = float(hl.get('x1', 0))
             if (y0 + 5 < hy < y1 - 5
-                    and hx0 >= x0 - 5 and hx1 <= x1 + 5
-                    and (hx1 - hx0) > 30):
+                    and (hx1 - hx0) > 30
+                    and min(hx1, x1) - max(hx0, x0) > cell_w * 0.5):
                 interior_hlines += 1
-        if interior_hlines >= 3:
+        if interior_hlines >= 2:
             return None
 
         label_clean = re.sub(r'[^a-zA-Z0-9\s]', '', cell_text).strip()
@@ -2344,21 +2349,35 @@ class TableCellDetector(BaseDetector):
 
                 # Beside-label placement
                 if prefer_beside and not _is_header_like_text(label_text_clean):
-                    entry_x0 = word_x1 + 4
-                    gap_words = pm.get_words_in_bbox((entry_x0, y0, x1, y1), 0.15)
-                    if not gap_words:
-                        label_clean = re.sub(r'[^a-zA-Z0-9\s]', '', clean_text).strip()
-                        return FieldCandidate(
-                            page=page_num,
-                            x0=entry_x0, y0=y0 + margin,
-                            x1=x1 - margin, y1=y1 - margin,
-                            field_type=FieldType.TEXT,
-                            source='label_entry_cell',
-                            name_hint=label_clean[:30] if label_clean else f"Cell_{int(entry_x0)}_{int(y0)}",
-                            label=label_text_clean,
-                            label_position='left',
-                            confidence=0.8,
-                        )
+                    # Skip cells crossing multiple h-line row boundaries
+                    _int_hl = 0
+                    _cw = max(1, x1 - x0)
+                    for _hl in pm.h_lines:
+                        _hy = float(_hl.get('y', _hl.get('top', 0)))
+                        _hx0 = float(_hl.get('x0', 0))
+                        _hx1 = float(_hl.get('x1', 0))
+                        if (y0 + 5 < _hy < y1 - 5
+                                and (_hx1 - _hx0) > 30
+                                and min(_hx1, x1) - max(_hx0, x0) > _cw * 0.5):
+                            _int_hl += 1
+                    if _int_hl >= 2:
+                        pass  # Spans multiple rows — skip beside-label
+                    else:
+                        entry_x0 = word_x1 + 4
+                        gap_words = pm.get_words_in_bbox((entry_x0, y0, x1, y1), 0.15)
+                        if not gap_words:
+                            label_clean = re.sub(r'[^a-zA-Z0-9\s]', '', clean_text).strip()
+                            return FieldCandidate(
+                                page=page_num,
+                                x0=entry_x0, y0=y0 + margin,
+                                x1=x1 - margin, y1=y1 - margin,
+                                field_type=FieldType.TEXT,
+                                source='label_entry_cell',
+                                name_hint=label_clean[:30] if label_clean else f"Cell_{int(entry_x0)}_{int(y0)}",
+                                label=label_text_clean,
+                                label_position='left',
+                                confidence=0.8,
+                            )
 
         # ---- COORDINATE CALCULATION ----
 

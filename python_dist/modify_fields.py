@@ -178,12 +178,11 @@ def build_calculate_js(calc: Dict[str, Any], field_name: str = None) -> str:
             constant = float(constant)
         except (ValueError, TypeError):
             constant = 1
-        # Use inline getField calls so extraction can recognise the pattern
-        inline_parts = []
-        for s in sources:
-            inline_parts.append(f'(Number(this.getField("{s}").value) || 0)')
-        expr = " * ".join(inline_parts)
-        js = f"event.value = {constant} * ({expr});"
+        parts = []
+        for i, s in enumerate(sources):
+            parts.append(f'var v{i} = Number(this.getField("{s}").value) || 0;')
+        expr = " * ".join(f"v{i}" for i in range(len(sources)))
+        js = "\n".join(parts) + f"\nevent.value = {constant} * ({expr});"
 
     elif calc_type == "DIVIDE" and len(sources) >= 2:
         parts = []
@@ -1886,10 +1885,9 @@ def apply_field_changes(pdf_path: str, output_path: str, changes: Dict[str, Any]
                                 if len(mk.keys()) == 0:
                                     del annot['/MK']
                                 elif not user_wants_transparent and '/BG' not in mk:
-                                    # /MK still has keys but no /BG — set explicitly
-                                    # transparent (empty array) to prevent black fill
-                                    # on regen without forcing the default blue color
-                                    mk['/BG'] = pikepdf.Array([])
+                                    # /MK still has keys but no /BG — add default
+                                    # to prevent black fill on regen
+                                    mk['/BG'] = pikepdf.Array(bg_rgb)
                             # No /MK at all: field is transparent — leave it alone
 
                         # B2. Visibility Enforcement for Buttons (Radio/Checkbox)
@@ -1965,9 +1963,6 @@ def apply_field_changes(pdf_path: str, output_path: str, changes: Dict[str, Any]
                     mk = annot.get('/MK')
                     if mk and '/BG' in mk:
                         c = mk['/BG']
-                        if len(c) < 3:
-                            # Empty /BG array means explicitly transparent
-                            continue
                         rb, gb, bb = float(c[0]), float(c[1]), float(c[2])
                     else:
                         # No /MK/BG — field is transparent; skip AP creation
