@@ -94,26 +94,28 @@ function python() {
 }
 
 // ===== BUNDLED EXECUTABLE SUPPORT =====
-// Architecture-specific folder name (ARM64 vs x64)
+// Architecture-specific folder name (Windows: dist_win, macOS ARM64: dist_arm64, macOS x64: dist_x64)
 function getArchFolder() {
+    if (process.platform === 'win32') return 'dist_win';
     return process.arch === 'x64' ? 'dist_x64' : 'dist_arm64';
 }
 
 // Get path to bundled executable (used in packaged app)
 function getBundledExecutable(name) {
     const archFolder = getArchFolder();
+    const exeSuffix = process.platform === 'win32' ? '.exe' : '';
 
     if (app.isPackaged) {
         // In packaged app, use architecture-specific bundled executables
-        return path.join(process.resourcesPath, 'python_dist', archFolder, name);
+        return path.join(process.resourcesPath, 'python_dist', archFolder, name + exeSuffix);
     } else {
         // In development, use bundled executables if they exist, otherwise use Python
-        const bundledPath = path.join(__dirname, 'python_dist', archFolder, name);
+        const bundledPath = path.join(__dirname, 'python_dist', archFolder, name + exeSuffix);
         if (fs.existsSync(bundledPath)) {
             return bundledPath;
         }
         // Fall back to legacy dist folder if architecture-specific not found
-        const legacyPath = path.join(__dirname, 'python_dist', 'dist', name);
+        const legacyPath = path.join(__dirname, 'python_dist', 'dist', name + exeSuffix);
         if (fs.existsSync(legacyPath)) {
             return legacyPath;
         }
@@ -151,13 +153,14 @@ let _serverBuffer = '';  // Accumulates partial stdout chunks
 function _getServerScriptPath() {
     if (app.isPackaged) {
         const archFolder = getArchFolder();
+        const exeSuffix = process.platform === 'win32' ? '.exe' : '';
         // --onedir bundled server: executable is inside a subdirectory
-        const onedirExe = path.join(process.resourcesPath, 'python_dist', archFolder, 'smart_fillable_server', 'smart_fillable_server');
+        const onedirExe = path.join(process.resourcesPath, 'python_dist', archFolder, 'smart_fillable_server', 'smart_fillable_server' + exeSuffix);
         if (fs.existsSync(onedirExe)) {
             return { type: 'exe', path: onedirExe };
         }
         // Legacy --onefile bundled server (single binary)
-        const onefileExe = path.join(process.resourcesPath, 'python_dist', archFolder, 'smart_fillable_server');
+        const onefileExe = path.join(process.resourcesPath, 'python_dist', archFolder, 'smart_fillable_server' + exeSuffix);
         if (fs.existsSync(onefileExe)) {
             return { type: 'exe', path: onefileExe };
         }
@@ -604,7 +607,8 @@ function getPythonScriptPath() {
 
     if (app.isPackaged) {
         // In packaged app, use architecture-specific bundled executable
-        const bundledExe = path.join(process.resourcesPath, 'python_dist', archFolder, 'smart_fillable');
+        const exeSuffix = process.platform === 'win32' ? '.exe' : '';
+        const bundledExe = path.join(process.resourcesPath, 'python_dist', archFolder, 'smart_fillable' + exeSuffix);
         if (fs.existsSync(bundledExe)) {
             return { type: 'exe', path: bundledExe };
         }
@@ -676,7 +680,8 @@ function getAcroFormFixScriptPath() {
     const binDir = app.isPackaged
         ? path.join(process.resourcesPath, 'python_dist', archFolder)
         : path.join(__dirname, 'python_dist', archFolder);
-    const binPath = path.join(binDir, 'apply_acroform_fix');
+    const exeSuffix = process.platform === 'win32' ? '.exe' : '';
+    const binPath = path.join(binDir, 'apply_acroform_fix' + exeSuffix);
     
     if (fs.existsSync(binPath)) {
         return { type: 'binary', path: binPath };
@@ -1049,7 +1054,8 @@ async function runGarbageFieldCleanup(pdfPath) {
             ? path.join(process.resourcesPath, 'python_dist', arch)
             : path.join(__dirname, 'python_dist', arch);
             
-        let binPath = path.join(binDir, 'garbage_field_cleanup');
+        const gcExeSuffix = process.platform === 'win32' ? '.exe' : '';
+        let binPath = path.join(binDir, 'garbage_field_cleanup' + gcExeSuffix);
         
         let cleanupProcess;
         
@@ -1129,7 +1135,8 @@ async function runAutoRenameAll(pdfPath) {
             ? path.join(process.resourcesPath, 'python_dist', arch)
             : path.join(__dirname, 'python_dist', arch);
             
-        let binPath = path.join(binDir, 'auto_rename_all');
+        const arExeSuffix = process.platform === 'win32' ? '.exe' : '';
+        let binPath = path.join(binDir, 'auto_rename_all' + arExeSuffix);
         
         let autoNameProcess;
         
@@ -1934,7 +1941,8 @@ ipcMain.handle('run-test-fill', async (event, inputPath, outputPath) => {
             const binDir = app.isPackaged 
                 ? path.join(process.resourcesPath, 'python_dist', arch)
                 : path.join(__dirname, 'python_dist', arch);
-            const fixCheckboxBin = path.join(binDir, 'fix_checkbox_appearances');
+            const fcExeSuffix = process.platform === 'win32' ? '.exe' : '';
+            const fixCheckboxBin = path.join(binDir, 'fix_checkbox_appearances' + fcExeSuffix);
             
             let fixProcess;
             
@@ -2227,9 +2235,10 @@ ipcMain.handle('extract-fields', async (event, pdfPath) => {
     return new Promise((resolve, reject) => {
         // Check for architecture-specific bundled executable
         const archFolder = getArchFolder();
+        const efExeSuffix = process.platform === 'win32' ? '.exe' : '';
         const bundledExe = app.isPackaged
-            ? path.join(process.resourcesPath, 'python_dist', archFolder, 'extract_fields')
-            : path.join(__dirname, 'python_dist', archFolder, 'extract_fields');
+            ? path.join(process.resourcesPath, 'python_dist', archFolder, 'extract_fields' + efExeSuffix)
+            : path.join(__dirname, 'python_dist', archFolder, 'extract_fields' + efExeSuffix);
 
         let pythonProcess;
 
@@ -2284,9 +2293,10 @@ ipcMain.handle('apply-field-changes', async (event, pdfPath, outputPath, changes
     return new Promise((resolve, reject) => {
         // Check for architecture-specific bundled executable
         const archFolder = getArchFolder();
+        const mfExeSuffix = process.platform === 'win32' ? '.exe' : '';
         const bundledExe = app.isPackaged
-            ? path.join(process.resourcesPath, 'python_dist', archFolder, 'modify_fields')
-            : path.join(__dirname, 'python_dist', archFolder, 'modify_fields');
+            ? path.join(process.resourcesPath, 'python_dist', archFolder, 'modify_fields' + mfExeSuffix)
+            : path.join(__dirname, 'python_dist', archFolder, 'modify_fields' + mfExeSuffix);
 
         // Write changes to temp file (to avoid command line length issues)
         const changesFile = path.join(require('os').tmpdir(), `pdf_editor_changes_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.json`);
@@ -2375,9 +2385,10 @@ ipcMain.handle('auto-name-field', async (event, pdfPath, pageNum, rect) => {
             // Check for bundled executable first
             // Determine correct architecture folder
             const archFolder = getArchFolder();
+            const anExeSuffix = process.platform === 'win32' ? '.exe' : '';
             const bundledExe = app.isPackaged 
-                ? path.join(process.resourcesPath, 'python_dist', archFolder, 'auto_name_field')
-                : path.join(__dirname, 'python_dist', archFolder, 'auto_name_field');
+                ? path.join(process.resourcesPath, 'python_dist', archFolder, 'auto_name_field' + anExeSuffix)
+                : path.join(__dirname, 'python_dist', archFolder, 'auto_name_field' + anExeSuffix);
             
             // rect is [x0, y0, x1, y1]
             const rectArgs = [
@@ -2458,9 +2469,10 @@ ipcMain.handle('auto-name-fields', async (event, pdfPath, fields) => {
             // Check for bundled executable first
             // Determine correct architecture folder
             const archFolder = getArchFolder();
+            const anBatchExeSuffix = process.platform === 'win32' ? '.exe' : '';
             const bundledExe = app.isPackaged 
-                ? path.join(process.resourcesPath, 'python_dist', archFolder, 'auto_name_field')
-                : path.join(__dirname, 'python_dist', archFolder, 'auto_name_field');
+                ? path.join(process.resourcesPath, 'python_dist', archFolder, 'auto_name_field' + anBatchExeSuffix)
+                : path.join(__dirname, 'python_dist', archFolder, 'auto_name_field' + anBatchExeSuffix);
             
             let childProcess;
             if (fs.existsSync(bundledExe)) {
