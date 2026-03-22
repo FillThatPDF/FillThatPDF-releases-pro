@@ -5,7 +5,6 @@ const fs = require('fs');
 const Store = require('electron-store');
 // Defer electron-updater require until app is ready (avoids getVersion crash in dev)
 const appConfig = require('./config');
-let sharedAutoUpdater = null; // Shared reference so renderer can trigger download
 
 // Suppress EPIPE errors (harmless pipe errors from child process communication)
 process.on('uncaughtException', (err) => {
@@ -15,47 +14,16 @@ process.on('uncaughtException', (err) => {
 
 function setupAutoUpdater() {
     const { autoUpdater } = require('electron-updater');
-    autoUpdater.autoDownload = false; // Don't auto-download — let user click "Download" first
-    // autoUpdater.forceDevUpdateConfig = true; // Uncomment for dev-mode testing with dev-app-update.yml
-    console.log('[AutoUpdater] Initializing...');
-
-    autoUpdater.on('checking-for-update', () => {
-        console.log('[AutoUpdater] Checking for update...');
-    });
-
-    autoUpdater.on('update-not-available', (info) => {
-        console.log('[AutoUpdater] No update available. Current:', info.version);
-    });
-
     autoUpdater.on('update-available', (info) => {
-        console.log('[AutoUpdater] Update available:', info.version);
-        // Send update info to renderer so it can show the green banner
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('update-available', {
-                version: info.version,
-                releaseNotes: info.releaseNotes
-            });
-        }
+        dialog.showMessageBox({
+            type: 'info',
+            title: 'Update Available',
+            message: `A new version (${info.version}) is available!`,
+            detail: 'It will be downloaded in the background. You will be notified when it is ready to install.',
+            buttons: ['OK']
+        });
     });
-
-    autoUpdater.on('download-progress', (progress) => {
-        console.log(`[AutoUpdater] Download progress: ${Math.round(progress.percent)}%`);
-        // Send download progress to renderer for progress display
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('update-download-progress', {
-                percent: Math.round(progress.percent),
-                transferred: progress.transferred,
-                total: progress.total
-            });
-        }
-    });
-
     autoUpdater.on('update-downloaded', (info) => {
-        console.log('[AutoUpdater] Download complete:', info.version);
-        // Notify renderer that download is complete
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('update-downloaded', { version: info.version });
-        }
         dialog.showMessageBox({
             type: 'info',
             title: 'Update Ready',
@@ -69,36 +37,23 @@ function setupAutoUpdater() {
         });
     });
     autoUpdater.on('error', (err) => {
-        console.error('[AutoUpdater] Error:', err.message);
-        // Notify renderer of error so it can reset the button
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('update-error', { message: err.message });
-        }
+        console.error('Auto-updater error:', err);
     });
-
-    sharedAutoUpdater = autoUpdater;
     return autoUpdater;
 }
 
 // Get the correct Python path - checks common locations for packaged app compatibility (for development mode)
 function getPythonPath() {
     // List of Python paths to check (in order of preference)
-    const pythonPaths = process.platform === 'win32'
-        ? [
-            path.join(__dirname, 'venv\\Scripts\\python.exe'),
-            path.join(__dirname, '.venv\\Scripts\\python.exe'),
-            'python',   // Windows typically uses 'python' not 'python3'
-            'python3',
-          ]
-        : [
-            path.join(__dirname, 'pyenv/bin/python3'), // Local pyenv
-            path.join(__dirname, 'venv/bin/python3'),  // Local venv
-            path.join(__dirname, '.venv/bin/python3'), // Local .venv
-            '/opt/homebrew/bin/python3',  // Homebrew on Apple Silicon
-            '/usr/local/bin/python3',      // Homebrew on Intel Mac
-            '/usr/bin/python3',            // System Python
-            'python3'                       // Fallback to PATH
-          ];
+    const pythonPaths = [
+        path.join(__dirname, 'pyenv/bin/python3'), // Local pyenv
+        path.join(__dirname, 'venv/bin/python3'),  // Local venv
+        path.join(__dirname, '.venv/bin/python3'), // Local .venv
+        '/opt/homebrew/bin/python3',  // Homebrew on Apple Silicon
+        '/usr/local/bin/python3',      // Homebrew on Intel Mac
+        '/usr/bin/python3',            // System Python
+        'python3'                       // Fallback to PATH
+    ];
 
     for (const pythonPath of pythonPaths) {
         try {
@@ -139,33 +94,26 @@ function python() {
 }
 
 // ===== BUNDLED EXECUTABLE SUPPORT =====
-// Architecture-specific folder name (ARM64 vs x64 vs Windows)
+// Architecture-specific folder name (ARM64 vs x64)
 function getArchFolder() {
-    if (process.platform === 'win32') return 'dist_win';
     return process.arch === 'x64' ? 'dist_x64' : 'dist_arm64';
-}
-
-// Resolve platform-specific binary name (.exe on Windows)
-function getBinaryName(baseName) {
-    return process.platform === 'win32' ? baseName + '.exe' : baseName;
 }
 
 // Get path to bundled executable (used in packaged app)
 function getBundledExecutable(name) {
     const archFolder = getArchFolder();
-    const binName = getBinaryName(name);
 
     if (app.isPackaged) {
         // In packaged app, use architecture-specific bundled executables
-        return path.join(process.resourcesPath, 'python_dist', archFolder, binName);
+        return path.join(process.resourcesPath, 'python_dist', archFolder, name);
     } else {
         // In development, use bundled executables if they exist, otherwise use Python
-        const bundledPath = path.join(__dirname, 'python_dist', archFolder, binName);
+        const bundledPath = path.join(__dirname, 'python_dist', archFolder, name);
         if (fs.existsSync(bundledPath)) {
             return bundledPath;
         }
         // Fall back to legacy dist folder if architecture-specific not found
-        const legacyPath = path.join(__dirname, 'python_dist', 'dist', binName);
+        const legacyPath = path.join(__dirname, 'python_dist', 'dist', name);
         if (fs.existsSync(legacyPath)) {
             return legacyPath;
         }
@@ -203,14 +151,13 @@ let _serverBuffer = '';  // Accumulates partial stdout chunks
 function _getServerScriptPath() {
     if (app.isPackaged) {
         const archFolder = getArchFolder();
-        const serverBin = getBinaryName('smart_fillable_server');
         // --onedir bundled server: executable is inside a subdirectory
-        const onedirExe = path.join(process.resourcesPath, 'python_dist', archFolder, 'smart_fillable_server', serverBin);
+        const onedirExe = path.join(process.resourcesPath, 'python_dist', archFolder, 'smart_fillable_server', 'smart_fillable_server');
         if (fs.existsSync(onedirExe)) {
             return { type: 'exe', path: onedirExe };
         }
         // Legacy --onefile bundled server (single binary)
-        const onefileExe = path.join(process.resourcesPath, 'python_dist', archFolder, serverBin);
+        const onefileExe = path.join(process.resourcesPath, 'python_dist', archFolder, 'smart_fillable_server');
         if (fs.existsSync(onefileExe)) {
             return { type: 'exe', path: onefileExe };
         }
@@ -402,79 +349,6 @@ function serverExtractFields(pdfPath) {
 
         const cmd = {
             cmd: 'extract_fields',
-            id: reqId,
-            input: pdfPath,
-        };
-
-        try {
-            _serverProcess.stdin.write(JSON.stringify(cmd) + '\n');
-        } catch (err) {
-            delete _serverPendingRequests[reqId];
-            reject(new Error(`Failed to write to server: ${err.message}`));
-        }
-    });
-}
-
-/**
- * Send a garbage_cleanup request to the persistent server.
- * Returns a Promise that resolves with the cleanup result.
- *
- * @param {string} pdfPath - Path to the PDF file
- * @param {string} sensitivity - 'conservative', 'standard', or 'aggressive'
- * @returns {Promise<object>} - { success, fields_removed, pages_cleaned, ... }
- */
-function serverGarbageCleanup(pdfPath, sensitivity = 'standard') {
-    return new Promise((resolve, reject) => {
-        if (!_serverProcess) {
-            startPythonServer();
-        }
-        if (!_serverProcess) {
-            reject(new Error('Could not start Python server'));
-            return;
-        }
-
-        const reqId = `req-${++_serverRequestCounter}`;
-        _serverPendingRequests[reqId] = { resolve, reject, progressCallback: null };
-
-        const cmd = {
-            cmd: 'garbage_cleanup',
-            id: reqId,
-            input: pdfPath,
-            output: pdfPath,
-            sensitivity: sensitivity,
-        };
-
-        try {
-            _serverProcess.stdin.write(JSON.stringify(cmd) + '\n');
-        } catch (err) {
-            delete _serverPendingRequests[reqId];
-            reject(new Error(`Failed to write to server: ${err.message}`));
-        }
-    });
-}
-
-/**
- * Send an auto_rename request to the persistent server.
- * Returns a Promise that resolves with the rename result.
- *
- * @param {string} pdfPath - Path to the PDF file
- * @returns {Promise<object>} - { success, renamed, total }
- */
-function serverAutoRename(pdfPath) {
-    return new Promise((resolve, reject) => {
-        if (!_serverProcess) {
-            startPythonServer();
-        }
-        if (!_serverProcess) {
-            reject(new Error('Could not start Python server'));
-            return;
-        }
-
-        const reqId = `req-${++_serverRequestCounter}`;
-        _serverPendingRequests[reqId] = { resolve, reject, progressCallback: null };
-
-        const cmd = {
-            cmd: 'auto_rename',
             id: reqId,
             input: pdfPath,
         };
@@ -730,7 +604,7 @@ function getPythonScriptPath() {
 
     if (app.isPackaged) {
         // In packaged app, use architecture-specific bundled executable
-        const bundledExe = path.join(process.resourcesPath, 'python_dist', archFolder, getBinaryName('smart_fillable'));
+        const bundledExe = path.join(process.resourcesPath, 'python_dist', archFolder, 'smart_fillable');
         if (fs.existsSync(bundledExe)) {
             return { type: 'exe', path: bundledExe };
         }
@@ -738,7 +612,7 @@ function getPythonScriptPath() {
         return { type: 'py', path: path.join(process.resourcesPath, 'smart_fillable_v24.py') };
     }
     // In development, preferentially use the Python script to ensure latest code changes are picked up
-    // const bundledExe = path.join(__dirname, 'python_dist', archFolder, getBinaryName('smart_fillable'));
+    // const bundledExe = path.join(__dirname, 'python_dist', archFolder, 'smart_fillable');
     // if (fs.existsSync(bundledExe)) {
     //    return { type: 'exe', path: bundledExe };
     // }
@@ -802,7 +676,7 @@ function getAcroFormFixScriptPath() {
     const binDir = app.isPackaged
         ? path.join(process.resourcesPath, 'python_dist', archFolder)
         : path.join(__dirname, 'python_dist', archFolder);
-    const binPath = path.join(binDir, getBinaryName('apply_acroform_fix'));
+    const binPath = path.join(binDir, 'apply_acroform_fix');
     
     if (fs.existsSync(binPath)) {
         return { type: 'binary', path: binPath };
@@ -843,15 +717,11 @@ app.whenReady().then(() => {
     // Start persistent Python server for fast PDF processing
     startPythonServer();
 
-    // Auto-update check (if enabled in settings)
+    // Auto-update check (if enabled in settings) - only in packaged app
     const checkForUpdates = settingsStore.get('settings.check_for_updates', true);
-    if (checkForUpdates) {
-        try {
-            const autoUpdater = setupAutoUpdater();
-            autoUpdater.checkForUpdates(); // Check only — don't download yet (user clicks "Download" in banner)
-        } catch (err) {
-            console.error('Auto-updater init failed:', err.message);
-        }
+    if (checkForUpdates && app.isPackaged) {
+        const autoUpdater = setupAutoUpdater();
+        autoUpdater.checkForUpdatesAndNotify();
     }
     
     // Create application menu
@@ -1068,27 +938,81 @@ ipcMain.handle('delete-template', async (event, name) => {
     return false;
 });
 
-// Update Download IPC Handler — triggered when user clicks "Download" in the update banner
-ipcMain.handle('trigger-update-download', async () => {
-    if (sharedAutoUpdater) {
-        try {
-            await sharedAutoUpdater.downloadUpdate();
-            return { success: true };
-        } catch (err) {
-            console.error('[AutoUpdater] Failed to download update:', err.message);
-            return { success: false, error: err.message };
+// Update Checker IPC Handler
+ipcMain.handle('check-for-updates', async () => {
+    try {
+        const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+        // Replace with actual repo details or configuration
+        // For now, we'll try to get it from package.json or use a placeholder logic
+        const pkg = require('./package.json');
+        
+        // Check if repository URL exists and is a GitHub URL
+        if (!pkg.repository || !pkg.repository.url || !pkg.repository.url.includes('github.com')) {
+            return { updateAvailable: false, reason: 'No GitHub repository configured' };
         }
+        
+        // Extract owner/repo from URL (e.g., https://github.com/owner/repo.git)
+        const match = pkg.repository.url.match(/github\.com\/([^/]+)\/([^/.]+)/);
+        if (!match) {
+            return { updateAvailable: false, reason: 'Invalid GitHub URL' };
+        }
+        
+        const owner = match[1];
+        const repo = match[2];
+        const apiUrl = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
+        
+        // Note: This requires internet access
+        // Using electron 'net' module or fetch if available in Node environment
+        // Since we are in Main process, we can use built-in fetch in Electron 28+ or dynamic import node-fetch
+        // Or just use net module
+        
+        const { net } = require('electron');
+        
+        return new Promise((resolve) => {
+            const request = net.request(apiUrl);
+            
+            request.on('response', (response) => {
+                let data = '';
+                response.on('data', (chunk) => {
+                    data += chunk;
+                });
+                
+                response.on('end', () => {
+                    if (response.statusCode === 200) {
+                        try {
+                            const release = JSON.parse(data);
+                            const latestVersion = release.tag_name.replace('v', '');
+                            const currentVersion = pkg.version;
+                            
+                            // Simple version comparison (semver is better but let's keep it simple)
+                            const updateAvailable = latestVersion !== currentVersion; // Naive check
+                            
+                            resolve({
+                                updateAvailable,
+                                currentVersion,
+                                latestVersion,
+                                releaseUrl: release.html_url,
+                                releaseNotes: release.body
+                            });
+                        } catch (e) {
+                            resolve({ updateAvailable: false, error: 'Failed to parse response' });
+                        }
+                    } else {
+                        resolve({ updateAvailable: false, error: `GitHub API error: ${response.statusCode}` });
+                    }
+                });
+            });
+            
+            request.on('error', (error) => {
+                resolve({ updateAvailable: false, error: error.message });
+            });
+            
+            request.end();
+        });
+        
+    } catch (error) {
+        return { updateAvailable: false, error: error.message };
     }
-    return { success: false, error: 'Auto-updater not initialized' };
-});
-
-// Restart & Install IPC Handler — triggered when user clicks "Restart Now" in the banner
-ipcMain.handle('trigger-update-install', async () => {
-    if (sharedAutoUpdater) {
-        sharedAutoUpdater.quitAndInstall();
-        return { success: true };
-    }
-    return { success: false, error: 'Auto-updater not initialized' };
 });
 
 // Show error dialog
@@ -1113,44 +1037,33 @@ ipcMain.handle('show-success', async (event, title, message) => {
 
 // Helper function to run garbage field cleanup on a PDF
 async function runGarbageFieldCleanup(pdfPath) {
-    const sensitivity = settingsStore.get('garbage_cleanup_sensitivity', 'standard');
-
-    // PATH A: Use the persistent server (fast — no process spawn overhead)
-    if (isServerAvailable()) {
-        console.log('[Garbage Cleanup] Using persistent server');
-        try {
-            const result = await serverGarbageCleanup(pdfPath, sensitivity);
-            return result;
-        } catch (err) {
-            console.error('[Garbage Cleanup] Server failed, falling back to spawn:', err.message);
-        }
-    }
-
-    // PATH B: Fallback to spawning binary or script
     return new Promise((resolve, reject) => {
+        // Get sensitivity setting
+        const sensitivity = settingsStore.get('garbage_cleanup_sensitivity', 'standard');
+
+        // Check for bundled executable first (prioritize compiled binary)
         const fs = require('fs');
         const arch = getArchFolder();
-
-        let binDir = app.isPackaged
+        
+        let binDir = app.isPackaged 
             ? path.join(process.resourcesPath, 'python_dist', arch)
             : path.join(__dirname, 'python_dist', arch);
-
-        let binPath = path.join(binDir, getBinaryName('garbage_field_cleanup'));
-
+            
+        let binPath = path.join(binDir, 'garbage_field_cleanup');
+        
         let cleanupProcess;
-
+        
         if (fs.existsSync(binPath)) {
             console.log('[Garbage Cleanup] Using binary:', binPath);
-            if (process.platform !== 'win32') {
-                try {
-                    fs.chmodSync(binPath, '755');
-                } catch (e) {
-                    console.error('[Garbage Cleanup] Failed to chmod binary:', e);
-                }
+            try {
+                fs.chmodSync(binPath, '755'); // Ensure executable
+            } catch (e) {
+                console.error('[Garbage Cleanup] Failed to chmod binary:', e);
             }
             cleanupProcess = spawn(binPath, [pdfPath, pdfPath, '--sensitivity', sensitivity]);
             setActiveProcess(cleanupProcess);
         } else {
+            // Fallback to Python script
             console.log('[Garbage Cleanup] Binary not found, falling back to script');
             const pythonExec = getPythonPath();
             let scriptDir;
@@ -1198,7 +1111,7 @@ async function runGarbageFieldCleanup(pdfPath) {
                 reject(new Error(`Garbage cleanup failed: ${errorOutput}`));
             }
         });
-
+        
         cleanupProcess.on('error', (err) => {
             reject(err);
         });
@@ -1207,52 +1120,37 @@ async function runGarbageFieldCleanup(pdfPath) {
 
 // Helper function to run auto-rename on all fields in a PDF
 async function runAutoRenameAll(pdfPath) {
-    // PATH A: Use the persistent server (fast — no process spawn overhead)
-    if (isServerAvailable()) {
-        console.log('[Auto Rename All] Using persistent server');
-        try {
-            const result = await serverAutoRename(pdfPath);
-            if (result.renamed !== undefined) {
-                mainWindow.webContents.send('progress-update', `   Renamed ${result.renamed} of ${result.total || '?'} fields\n`);
-            }
-            return true;
-        } catch (err) {
-            console.error('[Auto Rename All] Server failed, falling back to spawn:', err.message);
-        }
-    }
-
-    // PATH B: Fallback to spawning binary or script
     return new Promise((resolve, reject) => {
         const fs = require('fs');
         const arch = getArchFolder();
-
-        let binDir = app.isPackaged
+        
+        // Check for bundled executable first (prioritize compiled binary)
+        let binDir = app.isPackaged 
             ? path.join(process.resourcesPath, 'python_dist', arch)
             : path.join(__dirname, 'python_dist', arch);
-
-        let binPath = path.join(binDir, getBinaryName('auto_rename_all'));
-
+            
+        let binPath = path.join(binDir, 'auto_rename_all');
+        
         let autoNameProcess;
-
+        
         if (fs.existsSync(binPath)) {
             console.log('[Auto Rename All] Using binary:', binPath);
-            if (process.platform !== 'win32') {
+            try {
+                fs.chmodSync(binPath, 0o755);
+                // Attempt to remove quarantine attribute
                 try {
-                    fs.chmodSync(binPath, 0o755);
-                    if (process.platform === 'darwin') {
-                        try {
-                            execSync(`xattr -d com.apple.quarantine "${binPath}"`);
-                        } catch (e) {
-                            console.log('xattr command failed (ignoring):', e.message);
-                        }
-                    }
+                    execSync(`xattr -d com.apple.quarantine "${binPath}"`);
                 } catch (e) {
-                    console.error('Failed to set executable permissions:', e);
+                    // Ignore error if attribute doesn't exist or fails
+                    console.log('xattr command failed (ignoring):', e.message);
                 }
+            } catch (e) {
+                console.error('Failed to set executable permissions:', e);
             }
             autoNameProcess = spawn(binPath, [pdfPath]);
             setActiveProcess(autoNameProcess);
         } else {
+            // Fallback to Python script
             console.log('[Auto Rename All] Binary not found, falling back to script');
             const pythonExec = getPythonPath();
             let scriptDir;
@@ -1293,13 +1191,13 @@ async function runAutoRenameAll(pdfPath) {
                     }
                     resolve(true);
                 } catch (e) {
-                    resolve(true);
+                    resolve(true); // Still successful even if we can't parse output
                 }
             } else {
                 reject(new Error(`Auto-rename failed: ${errorOutput}`));
             }
         });
-
+        
         autoNameProcess.on('error', (err) => {
             reject(err);
         });
@@ -2036,7 +1934,7 @@ ipcMain.handle('run-test-fill', async (event, inputPath, outputPath) => {
             const binDir = app.isPackaged 
                 ? path.join(process.resourcesPath, 'python_dist', arch)
                 : path.join(__dirname, 'python_dist', arch);
-            const fixCheckboxBin = path.join(binDir, getBinaryName('fix_checkbox_appearances'));
+            const fixCheckboxBin = path.join(binDir, 'fix_checkbox_appearances');
             
             let fixProcess;
             
@@ -2330,8 +2228,8 @@ ipcMain.handle('extract-fields', async (event, pdfPath) => {
         // Check for architecture-specific bundled executable
         const archFolder = getArchFolder();
         const bundledExe = app.isPackaged
-            ? path.join(process.resourcesPath, 'python_dist', archFolder, getBinaryName('extract_fields'))
-            : path.join(__dirname, 'python_dist', archFolder, getBinaryName('extract_fields'));
+            ? path.join(process.resourcesPath, 'python_dist', archFolder, 'extract_fields')
+            : path.join(__dirname, 'python_dist', archFolder, 'extract_fields');
 
         let pythonProcess;
 
@@ -2387,8 +2285,8 @@ ipcMain.handle('apply-field-changes', async (event, pdfPath, outputPath, changes
         // Check for architecture-specific bundled executable
         const archFolder = getArchFolder();
         const bundledExe = app.isPackaged
-            ? path.join(process.resourcesPath, 'python_dist', archFolder, getBinaryName('modify_fields'))
-            : path.join(__dirname, 'python_dist', archFolder, getBinaryName('modify_fields'));
+            ? path.join(process.resourcesPath, 'python_dist', archFolder, 'modify_fields')
+            : path.join(__dirname, 'python_dist', archFolder, 'modify_fields');
 
         // Write changes to temp file (to avoid command line length issues)
         const changesFile = path.join(require('os').tmpdir(), `pdf_editor_changes_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.json`);
@@ -2477,10 +2375,10 @@ ipcMain.handle('auto-name-field', async (event, pdfPath, pageNum, rect) => {
             // Check for bundled executable first
             // Determine correct architecture folder
             const archFolder = getArchFolder();
-            const bundledExe = app.isPackaged
-                ? path.join(process.resourcesPath, 'python_dist', archFolder, getBinaryName('auto_name_field'))
-                : path.join(__dirname, 'python_dist', archFolder, getBinaryName('auto_name_field'));
-
+            const bundledExe = app.isPackaged 
+                ? path.join(process.resourcesPath, 'python_dist', archFolder, 'auto_name_field')
+                : path.join(__dirname, 'python_dist', archFolder, 'auto_name_field');
+            
             // rect is [x0, y0, x1, y1]
             const rectArgs = [
                 pdfPath,
@@ -2494,19 +2392,15 @@ ipcMain.handle('auto-name-field', async (event, pdfPath, pageNum, rect) => {
             let childProcess;
             if (fs.existsSync(bundledExe)) {
                 console.log('Running bundled auto_name_field:', bundledExe);
-                if (process.platform !== 'win32') {
+                try {
+                    fs.chmodSync(bundledExe, 0o755);
                     try {
-                        fs.chmodSync(bundledExe, 0o755);
-                        if (process.platform === 'darwin') {
-                            try {
-                                execSync(`xattr -d com.apple.quarantine "${bundledExe}"`);
-                            } catch (e) {
-                                // Ignore
-                            }
-                        }
+                        execSync(`xattr -d com.apple.quarantine "${bundledExe}"`);
                     } catch (e) {
-                        console.error('Failed to set permissions:', e);
+                        // Ignore
                     }
+                } catch (e) {
+                    console.error('Failed to set permissions:', e);
                 }
                 childProcess = spawn(bundledExe, rectArgs);
             } else {
@@ -2564,26 +2458,22 @@ ipcMain.handle('auto-name-fields', async (event, pdfPath, fields) => {
             // Check for bundled executable first
             // Determine correct architecture folder
             const archFolder = getArchFolder();
-            const bundledExe = app.isPackaged
-                ? path.join(process.resourcesPath, 'python_dist', archFolder, getBinaryName('auto_name_field'))
-                : path.join(__dirname, 'python_dist', archFolder, getBinaryName('auto_name_field'));
-
+            const bundledExe = app.isPackaged 
+                ? path.join(process.resourcesPath, 'python_dist', archFolder, 'auto_name_field')
+                : path.join(__dirname, 'python_dist', archFolder, 'auto_name_field');
+            
             let childProcess;
             if (fs.existsSync(bundledExe)) {
                 console.log('Running bundled auto_name_field (batch):', bundledExe);
-                if (process.platform !== 'win32') {
+                try {
+                    fs.chmodSync(bundledExe, 0o755);
                     try {
-                        fs.chmodSync(bundledExe, 0o755);
-                        if (process.platform === 'darwin') {
-                            try {
-                                execSync(`xattr -d com.apple.quarantine "${bundledExe}"`);
-                            } catch (e) {
-                                // Ignore
-                            }
-                        }
+                        execSync(`xattr -d com.apple.quarantine "${bundledExe}"`);
                     } catch (e) {
-                        console.error('Failed to set permissions:', e);
+                        // Ignore
                     }
+                } catch (e) {
+                    console.error('Failed to set permissions:', e);
                 }
                 childProcess = spawn(bundledExe, []);
             } else {
