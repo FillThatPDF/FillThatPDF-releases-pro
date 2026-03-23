@@ -651,6 +651,23 @@ def _parse_calculate_js(js_str: str, field_name: str = None) -> dict:
     if not js_str:
         return {}
 
+    # Check for CUSTOM_SCRIPT marker (written by modify_fields for CUSTOM_SCRIPT type)
+    if '/** BVCALC_CUSTOM_SCRIPT_START **/' in js_str:
+        script_match = re.search(
+            r'/\*\*\s*BVCALC_CUSTOM_SCRIPT_START\s*\*\*/(.*?)/\*\*\s*BVCALC_CUSTOM_SCRIPT_END\s*\*\*/',
+            js_str, re.DOTALL
+        )
+        if script_match:
+            script = script_match.group(1).strip()
+            refs = re.findall(r'(?:this\.)?getField\s*\(\s*["\']([^"\']+)["\']\s*\)', script)
+            seen_refs = set()
+            unique_refs = []
+            for ref in refs:
+                if ref not in seen_refs:
+                    seen_refs.add(ref)
+                    unique_refs.append(ref)
+            return {"type": "CUSTOM_SCRIPT", "script": script, "sources": unique_refs}
+
     # Try AFSimple_Calculate("SUM", new Array("field1", "field2"))
     af_match = re.search(
         r'AFSimple_Calculate\s*\(\s*["\'](\w+)["\']\s*,\s*(?:new\s+Array\s*\()?([^)]+)\)',
